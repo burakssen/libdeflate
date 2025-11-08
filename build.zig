@@ -26,17 +26,14 @@ pub fn build(b: *std.Build) void {
         lib.linkLibC();
     }
 
-    // Add include paths - this makes headers available to consumers
     lib.addIncludePath(upstream.path(""));
     lib.addIncludePath(upstream.path("lib"));
 
-    // Make the main header directory available to consumers of this library
     lib.installHeader(upstream.path("libdeflate.h"), "libdeflate.h");
 
     var sources: std.ArrayList([]const u8) = .empty;
     defer sources.deinit(b.allocator);
 
-    // Always include utils.c
     sources.append(b.allocator, "utils.c") catch @panic("OOM");
 
     // Compression sources
