@@ -1,0 +1,13 @@
+.{
+    .name = .libdeflate,
+    .version = "0.1.0",
+    .dependencies = .{
+        .libdeflate = .{
+            .url = "https://github.com/ebiggers/libdeflate/releases/download/v1.25/libdeflate-1.25.tar.gz",
+            .hash = "N-V-__8AACODCwCL9flGfJkJ2IlkP36ExXwOhPuIUgIFfB8l",
+        },
+    },
+    .minimum_zig_version = "0.15.2",
+    .paths = .{""},
+    .fingerprint = 0x3583a8cac6880887,
+}
