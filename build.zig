@@ -26,9 +26,12 @@ pub fn build(b: *std.Build) void {
         lib.linkLibC();
     }
 
-    // Common sources
+    // Add include paths - this makes headers available to consumers
     lib.addIncludePath(upstream.path(""));
     lib.addIncludePath(upstream.path("lib"));
+
+    // Make the main header directory available to consumers of this library
+    lib.installHeader(upstream.path("libdeflate.h"), "libdeflate.h");
 
     var sources: std.ArrayList([]const u8) = .empty;
     defer sources.deinit(b.allocator);
@@ -113,13 +116,6 @@ pub fn build(b: *std.Build) void {
         },
         else => {},
     }
-
-    // Install the public header
-    const header_install = b.addInstallHeaderFile(
-        upstream.path("libdeflate.h"),
-        "libdeflate.h",
-    );
-    b.getInstallStep().dependOn(&header_install.step);
 
     // Install the library
     b.installArtifact(lib);
