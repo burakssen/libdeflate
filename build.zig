@@ -114,13 +114,13 @@ pub fn build(b: *std.Build) void {
         else => {},
     }
 
-    // Install the library
-    b.installArtifact(lib);
-
     // Install the public header
     const header_install = b.addInstallHeaderFile(
         upstream.path("libdeflate.h"),
         "libdeflate.h",
     );
     b.getInstallStep().dependOn(&header_install.step);
+
+    // Install the library
+    b.installArtifact(lib);
 }
