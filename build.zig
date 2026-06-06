@@ -1,16 +1,51 @@
 const std = @import("std");
 
+const c_flags = &.{
+    "-Wall",
+    "-Wdeclaration-after-statement",
+    "-Wimplicit-fallthrough",
+    "-Wmissing-field-initializers",
+    "-Wmissing-prototypes",
+    "-Wpedantic",
+    "-Wshadow",
+    "-Wstrict-prototypes",
+    "-Wundef",
+    "-Wvla",
+    "-std=c99",
+};
+
+const Options = struct {
+    compression: bool,
+    decompression: bool,
+    zlib: bool,
+    gzip: bool,
+    freestanding: bool,
+
+    fn init(b: *std.Build) Options {
+        return .{
+            .compression = b.option(bool, "compression_support", "Support compression") orelse true,
+            .decompression = b.option(bool, "decompression_support", "Support decompression") orelse true,
+            .zlib = b.option(bool, "zlib_support", "Support the zlib format") orelse true,
+            .gzip = b.option(bool, "gzip_support", "Support the gzip format") orelse true,
+            .freestanding = b.option(bool, "freestanding", "Build a freestanding library") orelse false,
+        };
+    }
+};
+
+fn addIf(
+    b: *std.Build,
+    sources: *std.ArrayList([]const u8),
+    cond: bool,
+    files: []const []const u8,
+) void {
+    if (cond) sources.appendSlice(b.allocator, files) catch @panic("OOM");
+}
+
 pub fn build(b: *std.Build) void {
     const upstream = b.dependency("libdeflate", .{});
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
-
-    // Build options matching CMake's options
-    const compression_support = b.option(bool, "compression_support", "Support compression") orelse true;
-    const decompression_support = b.option(bool, "decompression_support", "Support decompression") orelse true;
-    const zlib_support = b.option(bool, "zlib_support", "Support the zlib format") orelse true;
-    const gzip_support = b.option(bool, "gzip_support", "Support the gzip format") orelse true;
-    const freestanding = b.option(bool, "freestanding", "Build a freestanding library") orelse false;
+    const opts = Options.init(b);
 
     const lib = b.addLibrary(.{
         .name = "deflate",
@@ -18,102 +53,78 @@ pub fn build(b: *std.Build) void {
         .root_module = b.createModule(.{
             .target = target,
             .optimize = optimize,
+            .link_libc = !opts.freestanding,
         }),
     });
 
-    // Link libc unless in freestanding mode
-    if (!freestanding) {
-        lib.linkLibC();
-    }
+    const mod = lib.root_module;
 
-    lib.addIncludePath(upstream.path(""));
-    lib.addIncludePath(upstream.path("lib"));
-
+    mod.addIncludePath(upstream.path(""));
+    mod.addIncludePath(upstream.path("lib"));
     lib.installHeader(upstream.path("libdeflate.h"), "libdeflate.h");
 
     var sources: std.ArrayList([]const u8) = .empty;
     defer sources.deinit(b.allocator);
 
-    sources.append(b.allocator, "utils.c") catch @panic("OOM");
+    addIf(b, &sources, true, &.{"utils.c"});
 
-    // Compression sources
-    if (compression_support) {
-        sources.append(b.allocator, "deflate_compress.c") catch @panic("OOM");
-    }
-
-    // Decompression sources
-    if (decompression_support) {
-        sources.append(b.allocator, "deflate_decompress.c") catch @panic("OOM");
-    }
-
-    // Zlib format support
-    if (zlib_support) {
-        sources.append(b.allocator, "adler32.c") catch @panic("OOM");
-        if (compression_support) {
-            sources.append(b.allocator, "zlib_compress.c") catch @panic("OOM");
-        }
-        if (decompression_support) {
-            sources.append(b.allocator, "zlib_decompress.c") catch @panic("OOM");
-        }
-    }
-
-    // Gzip format support
-    if (gzip_support) {
-        sources.append(b.allocator, "crc32.c") catch @panic("OOM");
-        if (compression_support) {
-            sources.append(b.allocator, "gzip_compress.c") catch @panic("OOM");
-        }
-        if (decompression_support) {
-            sources.append(b.allocator, "gzip_decompress.c") catch @panic("OOM");
-        }
-    }
-
-    // Add the collected source files
-    lib.addCSourceFiles(.{
-        .root = upstream.path("lib"),
-        .files = sources.items,
-        .flags = &.{
-            "-Wall",
-            "-Wdeclaration-after-statement",
-            "-Wimplicit-fallthrough",
-            "-Wmissing-field-initializers",
-            "-Wmissing-prototypes",
-            "-Wpedantic",
-            "-Wshadow",
-            "-Wstrict-prototypes",
-            "-Wundef",
-            "-Wvla",
-            "-std=c99",
-        },
+    addIf(b, &sources, opts.compression, &.{
+        "deflate_compress.c",
     });
 
-    // Compiler definitions
-    if (freestanding) {
-        lib.root_module.addCMacro("FREESTANDING", "null");
-    }
+    addIf(b, &sources, opts.decompression, &.{
+        "deflate_decompress.c",
+    });
 
-    // Architecture-specific sources and includes
+    addIf(b, &sources, opts.zlib, &.{
+        "adler32.c",
+    });
+    addIf(b, &sources, opts.zlib and opts.compression, &.{
+        "zlib_compress.c",
+    });
+    addIf(b, &sources, opts.zlib and opts.decompression, &.{
+        "zlib_decompress.c",
+    });
+
+    addIf(b, &sources, opts.gzip, &.{
+        "crc32.c",
+    });
+    addIf(b, &sources, opts.gzip and opts.compression, &.{
+        "gzip_compress.c",
+    });
+    addIf(b, &sources, opts.gzip and opts.decompression, &.{
+        "gzip_decompress.c",
+    });
+
+    mod.addCSourceFiles(.{
+        .root = upstream.path("lib"),
+        .files = sources.items,
+        .flags = c_flags,
+    });
+
+    if (opts.freestanding)
+        mod.addCMacro("FREESTANDING", "1");
+
     switch (target.result.cpu.arch) {
-        .arm, .aarch64, .aarch64_be, .armeb => {
-            lib.addCSourceFiles(.{
+        .arm, .armeb, .aarch64, .aarch64_be => {
+            mod.addIncludePath(upstream.path("lib/arm"));
+            mod.addCSourceFiles(.{
                 .root = upstream.path("lib/arm"),
                 .files = &.{"cpu_features.c"},
             });
-            lib.addIncludePath(upstream.path("lib/arm"));
-        },
-        .riscv32, .riscv64 => {
-            lib.addIncludePath(upstream.path("lib/riscv"));
         },
         .x86, .x86_64 => {
-            lib.addCSourceFiles(.{
+            mod.addIncludePath(upstream.path("lib/x86"));
+            mod.addCSourceFiles(.{
                 .root = upstream.path("lib/x86"),
                 .files = &.{"cpu_features.c"},
             });
-            lib.addIncludePath(upstream.path("lib/x86"));
+        },
+        .riscv32, .riscv64 => {
+            mod.addIncludePath(upstream.path("lib/riscv"));
         },
         else => {},
     }
 
-    // Install the library
     b.installArtifact(lib);
 }
